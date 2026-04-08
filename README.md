@@ -17,12 +17,6 @@ This repository contains the source code for:
 - support a background image for the JSON library
 - extract cover icons automatically on Windows with `orbis-pub-cmd.exe` from [PS4 Fake PKG Tools by CyB1K](https://github.com/CyB1K/PS4-Fake-PKG-Tools-3.87)
 
-## Project Layout
-
-- [windows/gui](): Electron desktop app for Windows
-- [windows/cli](): Node.js terminal version for Windows
-- [linux](): Node.js terminal version for Linux
-
 ## Release Downloads
 
 Check ther [Releases](https://github.com/CyberMask367/FPKGi-node-server/releases) section for files:
@@ -286,17 +280,15 @@ It uses the JSON output path automatically and can be opened in a browser from t
 
 If you want to run from source instead of using the releases:
 
-- run the Electron project from [windows/gui]()
-- run the Windows Node CLI from [windows/cli]()
-- run the Linux Node tools from [linux]()
-
-Do not commit `node_modules` or build output to GitHub.
+- run the Electron project from [windows/gui](https://github.com/CyberMask367/FPKGi-node-server/tree/main/windows/gui)
+- run the Windows Node CLI from [windows/cli](https://github.com/CyberMask367/FPKGi-node-server/tree/main/windows/cli)
+- run the Linux Node tools from [linux](https://github.com/CyberMask367/FPKGi-node-server/tree/main/linux)
 
 After cloning the repo, install dependencies locally only where they are needed.
 
 ### Windows GUI From Source
 
-In [windows/gui]():
+In [windows/gui](https://github.com/CyberMask367/FPKGi-node-server/tree/main/windows/gui):
 
 ```bash
 npm install
@@ -319,7 +311,7 @@ The GUI source project expects these files in the same folder:
 
 ### Windows CLI From Source
 
-In [windows/cli]():
+In [windows/cli](https://github.com/CyberMask367/FPKGi-node-server/tree/main/windows/cli):
 
 ```bash
 node node-menu.js
@@ -329,7 +321,7 @@ The Windows CLI runs directly with Node.js and does not need the Electron GUI `n
 
 ### Linux From Source
 
-In [linux]():
+In [linux](https://github.com/CyberMask367/FPKGi-node-server/tree/main/linux):
 
 ```bash
 node node-menu-linux.js
