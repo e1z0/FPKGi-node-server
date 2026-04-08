@@ -65,6 +65,9 @@ Installation:
 2. Follow the setup wizard.
 3. Launch `FPKGi Node Server` from the Start menu or installed folder.
 
+<img width="1587" height="1067" alt="image" src="https://github.com/user-attachments/assets/cf4651d6-39f6-4ad5-ab3c-14d8dc11b4d5" />
+
+
 Notes:
 
 - Node.js is not required for the packaged GUI release.
