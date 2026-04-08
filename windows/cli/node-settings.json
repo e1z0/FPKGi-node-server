@@ -1,0 +1,20 @@
+{
+    "serverAddress": "localhost:8080",
+    "httpServer": {
+        "enabled": false,
+        "address": "localhost",
+        "port": 8080
+    },
+    "jsonLibraryServer": {
+        "enabled": false,
+        "address": "localhost",
+        "port": 3000
+    },
+    "paths": {
+        "pkgScan": "",
+        "covers": ""
+    },
+    "output": {
+        "path": ""
+    }
+}

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPKGi Node Server</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div>
+                <h1 class="eyebrow">FPKGi Node Server</h1>
+                <p></p>
+                <p class="intro">Run cover extraction, JSON generation, a HTTP and JSON Server from one desktop app.</p>
+            </div>
+            <nav class="nav">
+                <button class="nav-link is-active" data-view="dashboard">Dashboard</button>
+                <button class="nav-link" data-view="settings">Settings</button>
+            </nav>
+            <div class="sidebar-note">
+                <strong>Made by CyberMask367</strong>
+                <span>V1.0</span>
+            </div>
+        </aside>
+
+        <main class="content">
+            <section class="view is-active" data-view-panel="dashboard">
+                <div class="hero">
+                    <div>
+                        <h2 class="intro">Dashboard</h2>
+                        <p>Use the button to extract icons, rebuild JSON files, and keep an eye on app logs while it runs.</p>
+                    </div>
+                    <div class="hero-actions">
+                        <button id="runScanButton" class="primary-button">Run Scan</button>
+                        <button id="stopScanButton" class="secondary-button" disabled>Stop Scan</button>
+                    </div>
+                </div>
+
+                <div class="status-grid">
+                    <article class="status-card">
+                        <span class="status-label">HTTP Server</span>
+                        <strong id="httpServerStatus">Checking...</strong>
+                        <span id="httpServerUrl" class="status-meta"></span>
+                    </article>
+                    <article class="status-card">
+                        <span class="status-label">Orbis Tool</span>
+                        <strong id="orbisStatus">Checking...</strong>
+                        <span id="orbisPath" class="status-meta"></span>
+                    </article>
+                    <article class="status-card">
+                        <span class="status-label">Current Job</span>
+                        <strong id="scanStatus">Idle</strong>
+                        <span class="status-meta">The dashboard updates live while the scan is running.</span>
+                    </article>
+                    <article class="status-card">
+                        <span class="status-label">JSON Library Server</span>
+                        <strong id="jsonLibraryStatus">Checking...</strong>
+                        <span id="jsonLibraryUrl" class="status-meta"></span>
+                        <button id="openJsonLibraryButton" class="ghost-button card-button" disabled>Open in Browser</button>
+                    </article>
+                </div>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="eyebrow">Live Logs</p>
+                            <h3>Processing Output</h3>
+                        </div>
+                    </div>
+                    <pre id="logOutput" class="log-box"></pre>
+                </section>
+            </section>
+
+            <section class="view" data-view-panel="settings">
+                <div class="hero compact">
+                    <div>
+                        <h2 class="intro">Settings</h2>
+                        <p>Choose where PKGs are scanned, where covers live, and whether the built-in HTTP or JSON server should stay on.</p>
+                    </div>
+                    <button id="saveSettingsButton" class="secondary-button">Save Settings</button>
+                </div>
+
+                <section class="panel settings-panel">
+                    <div class="settings-grid">
+                        <label class="field field-toggle">
+                            <span>Enable HTTP server</span>
+                            <input id="httpEnabled" type="checkbox">
+                        </label>
+
+                        <label class="field field-toggle">
+                            <span>Enable JSON library server</span>
+                            <input id="jsonLibraryEnabled" type="checkbox">
+                        </label>
+
+                        <label class="field field-toggle">
+                            <span>Run app in background when closed</span>
+                            <input id="runInBackground" type="checkbox">
+                        </label>
+
+                        <label class="field field-toggle">
+                            <span>Run app on Windows startup</span>
+                            <input id="runOnStartup" type="checkbox">
+                        </label>
+
+                        <label class="field field-toggle">
+                            <span>Start in background on launch</span>
+                            <input id="startInBackgroundOnStartup" type="checkbox">
+                        </label>
+
+                        <label class="field">
+                            <span>HTTP server IP</span>
+                            <input id="httpAddress" type="text" placeholder="localhost">
+                        </label>
+
+                        <label class="field">
+                            <span>HTTP server Port</span>
+                            <input id="httpPort" type="number" min="1" max="65535" placeholder="8080">
+                        </label>
+
+                        <label class="field">
+                            <span>JSON library server IP</span>
+                            <input id="jsonLibraryAddress" type="text" placeholder="localhost">
+                        </label>
+
+                        <label class="field">
+                            <span>JSON library Server Port</span>
+                            <input id="jsonLibraryPort" type="number" min="1" max="65535" placeholder="3000">
+                        </label>
+
+                        <label class="field">
+                            <span>Fallback server address for PKG Scanning</span>
+                            <input id="serverAddress" type="text" placeholder="localhost:8080">
+                        </label>
+
+                        <div class="field field-path">
+                            <span>PKG scan path</span>
+                            <div class="path-row">
+                                <input id="pkgScanPath" type="text" placeholder="D:\pkg">
+                                <button data-browse-target="pkgScanPath" class="ghost-button">Browse</button>
+                            </div>
+                        </div>
+
+                        <div class="field field-path">
+                            <span>Covers path</span>
+                            <div class="path-row">
+                                <input id="coversPath" type="text" placeholder="D:\covers">
+                                <button data-browse-target="coversPath" class="ghost-button">Browse</button>
+                            </div>
+                        </div>
+
+                        <div class="field field-path">
+                            <span>JSON output path</span>
+                            <div class="path-row">
+                                <input id="jsonOutputPath" type="text" placeholder="D:\json">
+                                <button data-browse-target="jsonOutputPath" class="ghost-button">Browse</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast" class="toast" aria-live="polite"></div>
+
+    <script src="./renderer.js"></script>
+</body>
+</html>

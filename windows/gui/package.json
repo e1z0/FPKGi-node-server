@@ -1,0 +1,60 @@
+{
+    "name": "fpkgi-node-server",
+    "version": "1.0.0",
+    "author": "CyberMask367",
+    "description": "FPKGi JSON generator desktop app",
+    "main": "electron/main.js",
+    "scripts": {
+        "start": "electron .",
+        "start:node-menu": "node node-menu.js",
+        "start:node-menu-linux": "node node-menu-linux.js",
+        "start:cli": "electron cli/main.js",
+        "build": "electron-builder --win nsis",
+        "build:cli": "electron-builder --config electron-builder.cli.json --win nsis"
+    },
+    "build": {
+        "appId": "com.codex.fpkgi.node.server",
+        "productName": "FPKGi Node Server",
+        "directories": {
+            "buildResources": "electron/assets",
+            "output": "dist"
+        },
+        "files": [
+            "electron/**/*",
+            "app/**/*",
+            "package.json"
+        ],
+        "extraResources": [
+            {
+                "from": "electron/assets/icon.ico",
+                "to": "icon.ico"
+            },
+            {
+                "from": "orbis-pub-cmd.exe",
+                "to": "bin/orbis-pub-cmd.exe"
+            },
+            {
+                "from": "orbis-pub-prx.dll",
+                "to": "bin/orbis-pub-prx.dll"
+            },
+            {
+                "from": "ext",
+                "to": "bin/ext"
+            }
+        ],
+        "win": {
+            "icon": "electron/assets/icon.ico",
+            "target": [
+                "nsis"
+            ]
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true
+        }
+    },
+    "devDependencies": {
+        "electron": "^37.2.0",
+        "electron-builder": "^26.0.12"
+    }
+}
