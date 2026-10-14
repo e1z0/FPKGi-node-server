@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
 const http = require("http");
+const { buildPackageUrl } = require("./app/package-url");
 
 const configPath = path.join(__dirname, "json-generator-config.json");
 
@@ -171,8 +172,8 @@ function generateJSON(category, games) {
     const jsonData = { DATA: {} };
 
     for (const game of games) {
-        const pkgUrl = `http://${SERVER_ADDRESS}/pkg/${category}/${path.basename(game.pkgPath)}`;
-        jsonData.DATA[encodeURI(pkgUrl)] = {
+        const pkgUrl = buildPackageUrl(SERVER_ADDRESS, BASE_DIR, game.pkgPath);
+        jsonData.DATA[pkgUrl] = {
             region: game.region,
             title_id: game.title_id,
             name: game.title,

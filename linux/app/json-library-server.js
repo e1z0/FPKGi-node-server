@@ -143,7 +143,7 @@ function sendJsonFile(res, filePath) {
     fs.createReadStream(filePath).pipe(res);
 }
 
-function renderHomePage(hostname, port, jsonDir) {
+function renderHomePage(serverAddress, jsonDir) {
     const jsonFiles = fs.readdirSync(jsonDir)
         .filter(file => file.endsWith(".json"))
         .map(file => {
@@ -260,7 +260,7 @@ function renderHomePage(hostname, port, jsonDir) {
         <h2>Generated Config</h2>
         <p>Use the following configuration in your FPKGi config</p>
         <textarea id="json" readonly class="dark-textarea">
-"background_uri": "http://${hostname}:${port}/background",
+"background_uri": "http://${serverAddress}/background",
 
 "CONTENT_URLS": {
     ${(() => {
@@ -268,7 +268,7 @@ function renderHomePage(hostname, port, jsonDir) {
         const availableNames = new Set(jsonFiles.map(f => f.name));
         return FIXED_CATEGORIES.map(cat =>
             availableNames.has(cat)
-                ? `"${cat}": "http://${hostname}:${port}/${cat}"`
+                ? `"${cat}": "http://${serverAddress}/${cat}"`
                 : `"${cat}": null`
         ).join(",\n    ");
     })()}
@@ -400,7 +400,8 @@ function startJsonLibraryServer(settings, options = {}) {
         const pathname = decodeURIComponent(requestUrl.pathname);
 
         if (pathname === "/") {
-            send(res, 200, renderHomePage(host, port, jsonDir), "text/html; charset=utf-8");
+            const publicAddress = req.headers.host || `${host}:${port}`;
+            send(res, 200, renderHomePage(publicAddress, jsonDir), "text/html; charset=utf-8");
             return;
         }
 

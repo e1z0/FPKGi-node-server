@@ -3,6 +3,8 @@ const path = require("path");
 const readline = require("readline");
 const { startHttpServer, stopHttpServer, validateSettings } = require("./app/processor");
 const { startJsonLibraryServer, stopJsonLibraryServer } = require("./app/json-library-server");
+const { inspectPs4Pkg, extractPs4Icon } = require("./app/ps4-pkg");
+const { buildPackageUrl } = require("./app/package-url");
 
 let httpServerInstance = null;
 let jsonLibraryServerInstance = null;
@@ -70,95 +72,6 @@ function loadOrCreateSettings() {
     };
 }
 
-function readBytes(fd, offset, length) {
-    const buf = Buffer.alloc(length);
-    fs.readSync(fd, buf, 0, length, offset);
-    return buf;
-}
-
-function parseSFO(buffer) {
-    const keyTableOffset = buffer.readUInt32LE(8);
-    const dataOffset = buffer.readUInt32LE(12);
-    const numEntries = buffer.readUInt32LE(16);
-    const keyTable = buffer.slice(keyTableOffset);
-    const gameInfo = {};
-
-    for (let i = 0; i < numEntries; i++) {
-        const entryOffset = 20 + i * 16;
-        if (entryOffset + 16 > buffer.length) continue;
-
-        const keyOffset = buffer.readUInt16LE(entryOffset);
-        const valueType = buffer.readUInt16LE(entryOffset + 2);
-        const valueSize = buffer.readUInt32LE(entryOffset + 4);
-        const relativeDataOffset = buffer.readUInt32LE(entryOffset + 12);
-        const absoluteDataOffset = dataOffset + relativeDataOffset;
-
-        if (keyOffset >= keyTable.length) continue;
-
-        let keyEnd = keyTable.indexOf(0, keyOffset);
-        if (keyEnd === -1) keyEnd = keyTable.length;
-        const key = keyTable.slice(keyOffset, keyEnd).toString("utf8");
-
-        if (absoluteDataOffset + valueSize > buffer.length) continue;
-
-        if (valueType === 0x0204) {
-            gameInfo[key] = buffer.slice(absoluteDataOffset, absoluteDataOffset + valueSize).toString("utf8").replace(/\0/g, "");
-        } else if (valueType === 0x0404) {
-            gameInfo[key] = buffer.readUInt32LE(absoluteDataOffset);
-        }
-    }
-
-    return gameInfo;
-}
-
-function extractGameDetails(pkgPath) {
-    let fd;
-
-    try {
-        fd = fs.openSync(pkgPath, "r");
-        const fileSize = fs.statSync(pkgPath).size;
-        let offset = 0;
-        let foundOffset = null;
-
-        while (offset < fileSize) {
-            const buf = readBytes(fd, offset, Math.min(1048576, fileSize - offset));
-            const match = buf.indexOf(Buffer.from("\x00PSF\x01\x01\x00\x00", "binary"));
-            if (match !== -1) {
-                foundOffset = offset + match;
-                break;
-            }
-            offset += 1048576;
-        }
-
-        if (foundOffset === null) return null;
-        return parseSFO(readBytes(fd, foundOffset, 2048));
-    } catch (_) {
-        return null;
-    } finally {
-        if (typeof fd === "number") fs.closeSync(fd);
-    }
-}
-
-function readPkgMetadata(pkgPath) {
-    let fd;
-
-    try {
-        fd = fs.openSync(pkgPath, "r");
-        const buffer = Buffer.alloc(0x800);
-        fs.readSync(fd, buffer, 0, 0x800, 0);
-        const contentId = buffer.slice(0x30, 0x50).toString("utf8").replace(/\0/g, "");
-        const titleIdMatch = contentId.match(/-(CUSA\d+)/);
-        return {
-            contentId: contentId || null,
-            titleId: titleIdMatch ? titleIdMatch[1] : null
-        };
-    } catch (_) {
-        return { contentId: null, titleId: null };
-    } finally {
-        if (typeof fd === "number") fs.closeSync(fd);
-    }
-}
-
 function detectRegion(contentId) {
     if (!contentId) return "UNK";
     if (contentId.startsWith("UP")) return "USA";
@@ -170,6 +83,49 @@ function detectRegion(contentId) {
 function getFormattedDate(filePath) {
     const d = new Date(fs.statSync(filePath).birthtime);
     return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}-${d.getFullYear()}`;
+}
+
+function safeCoverKey(value) {
+    if (!value) return null;
+    const safe = String(value).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim();
+    return safe || null;
+}
+
+function getCoverKey(category, titleId, contentId) {
+    const normalizedCategory = category.toLowerCase();
+    const useContentId = normalizedCategory === "dlc" || normalizedCategory === "themes";
+    return safeCoverKey(useContentId ? (contentId || titleId) : titleId);
+}
+
+function hasValidImageSignature(filePath) {
+    try {
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile() || stat.size < 8) return false;
+        const fd = fs.openSync(filePath, "r");
+        try {
+            const signature = Buffer.alloc(8);
+            if (fs.readSync(fd, signature, 0, 8, 0) !== 8) return false;
+            const isPng = signature.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+            const isJpeg = signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff;
+            return isPng || isJpeg;
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch (_) {
+        return false;
+    }
+}
+
+function getCategoryCoverState(coversDir, category, coverKey) {
+    if (!coverKey) return { validPath: null, invalidPath: null };
+    let invalidPath = null;
+    for (const extension of [".png", ".jpg", ".jpeg"]) {
+        const candidate = path.join(coversDir, category, `${coverKey}${extension}`);
+        if (!fs.existsSync(candidate)) continue;
+        if (hasValidImageSignature(candidate)) return { validPath: candidate, invalidPath: null };
+        if (!invalidPath) invalidPath = candidate;
+    }
+    return { validPath: null, invalidPath };
 }
 
 function collectPkgFiles(baseDir) {
@@ -199,19 +155,22 @@ function collectPkgFiles(baseDir) {
             });
 
             if (pkgFiles.length > 0) {
+                pkgFiles.sort((a, b) => a.localeCompare(b));
                 pkgsByCategory[categoryEntry.name] = pkgFiles;
                 pkgFiles.forEach(pkgPath => pkgList.push({ pkgPath, category: categoryEntry.name }));
             }
         });
 
+    pkgList.sort((a, b) => a.pkgPath.localeCompare(b.pkgPath));
     return { pkgList, pkgsByCategory };
 }
 
 function findCoverImage(coversDir, serverAddress, titleId, contentId, category) {
     const extensions = [".png", ".jpg", ".jpeg"];
-    const isDlcOrTheme = category === "DLC" || category === "themes";
-    const primaryKey = isDlcOrTheme ? (contentId || titleId) : titleId;
-    const secondaryKey = titleId;
+    const normalizedCategory = category.toLowerCase();
+    const isDlcOrTheme = normalizedCategory === "dlc" || normalizedCategory === "themes";
+    const primaryKey = safeCoverKey(isDlcOrTheme ? (contentId || titleId) : titleId);
+    const secondaryKey = safeCoverKey(titleId);
     const allFolders = [category, "games", "apps", "updates", "DLC", "demos", "homebrew", "emulators", "themes", "PS1", "PS2", "PSP"];
 
     if (primaryKey) {
@@ -248,13 +207,30 @@ function findCoverImage(coversDir, serverAddress, titleId, contentId, category) 
     return `http://${serverAddress}/covers/default.png`;
 }
 
-function generateJSON(jsonOutputDir, serverAddress, category, games) {
+function writeTextFileIfChanged(filePath, content) {
+    try {
+        if (fs.readFileSync(filePath, "utf8") === content) return false;
+    } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+    }
+
+    const temporaryPath = `${filePath}.tmp-${process.pid}`;
+    try {
+        fs.writeFileSync(temporaryPath, content, { mode: 0o644 });
+        fs.renameSync(temporaryPath, filePath);
+    } finally {
+        try { fs.unlinkSync(temporaryPath); } catch (_) {}
+    }
+    return true;
+}
+
+function generateJSON(jsonOutputDir, serverAddress, category, games, baseDir) {
     const jsonFilePath = path.join(jsonOutputDir, `${category}.json`);
     const jsonData = { DATA: {} };
 
     games.forEach(game => {
-        const pkgUrl = `http://${serverAddress}/pkg/${category}/${path.basename(game.pkgPath)}`;
-        jsonData.DATA[encodeURI(pkgUrl)] = {
+        const pkgUrl = buildPackageUrl(serverAddress, baseDir, game.pkgPath);
+        jsonData.DATA[pkgUrl] = {
             region: game.region,
             title_id: game.title_id,
             name: game.title,
@@ -266,7 +242,47 @@ function generateJSON(jsonOutputDir, serverAddress, category, games) {
         };
     });
 
-    fs.writeFileSync(jsonFilePath, JSON.stringify(jsonData, null, 4));
+    return writeTextFileIfChanged(jsonFilePath, JSON.stringify(jsonData, null, 4));
+}
+
+const SCAN_CACHE_VERSION = 1;
+const SCAN_CACHE_FILENAME = ".fpkgi-cache-v1";
+
+function emptyScanCache(serverAddress) {
+    return { version: SCAN_CACHE_VERSION, serverAddress, packages: {} };
+}
+
+function loadScanCache(jsonOutputDir, serverAddress) {
+    const cachePath = path.join(jsonOutputDir, SCAN_CACHE_FILENAME);
+    try {
+        const parsed = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+        if (parsed.version !== SCAN_CACHE_VERSION || !parsed.packages || typeof parsed.packages !== "object") {
+            throw new Error("unsupported cache format");
+        }
+        return { cachePath, cache: parsed, reset: false };
+    } catch (error) {
+        if (error.code !== "ENOENT") log(`Ignoring scan cache: ${error.message}`);
+        return { cachePath, cache: emptyScanCache(serverAddress), reset: true };
+    }
+}
+
+function getPkgFingerprint(pkgPath) {
+    const stat = fs.statSync(pkgPath, { bigint: true });
+    return {
+        size: stat.size.toString(),
+        mtimeNs: stat.mtimeNs.toString(),
+        ctimeNs: stat.ctimeNs.toString()
+    };
+}
+
+function sameFingerprint(left, right) {
+    return Boolean(left && right && left.size === right.size &&
+        left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs);
+}
+
+function serializableIconEntry(entry) {
+    if (!entry) return null;
+    return { offset: entry.offset, size: entry.size, encrypted: entry.encrypted };
 }
 
 function createPrompt() {
@@ -385,9 +401,10 @@ async function runJsonOnly(settings) {
     const baseDir = settings.paths.pkgScan;
     const coversDir = settings.paths.covers;
     const jsonOutputDir = settings.output.path;
-    const serverAddress = settings.httpServer?.enabled
-        ? `${settings.httpServer.address}:${settings.httpServer.port}`
-        : settings.serverAddress;
+    // The address clients use can differ from the interface the HTTP server
+    // listens on (for example, when running behind a Docker port mapping).
+    const serverAddress = settings.serverAddress ||
+        `${settings.httpServer.address}:${settings.httpServer.port}`;
 
     if (!fs.existsSync(baseDir)) throw new Error(`PKG scan directory not found: ${baseDir}`);
 
@@ -395,56 +412,163 @@ async function runJsonOnly(settings) {
     fs.mkdirSync(jsonOutputDir, { recursive: true });
 
     const { pkgList, pkgsByCategory } = collectPkgFiles(baseDir);
-    if (pkgList.length === 0) {
-        log("No PKG files found in any category subfolder.");
-        return;
-    }
+    const { cachePath, cache: previousCache, reset: cacheReset } = loadScanCache(jsonOutputDir, serverAddress);
+    const nextCache = emptyScanCache(serverAddress);
+    const gamesByCategory = {};
+    const currentKeys = new Set();
+    const previousCategories = new Set(Object.values(previousCache.packages)
+        .map(entry => entry && entry.category)
+        .filter(Boolean));
 
     log(`Found ${pkgList.length} PKG(s) across ${Object.keys(pkgsByCategory).length} categories`);
     log("-".repeat(55));
-    log("STEP 1: Generating JSON Files");
+    log("STEP 1: Updating PS4 metadata cache and icons");
 
     let totalProcessed = 0;
+    let inspected = 0;
+    let reused = 0;
+    let removed = 0;
+    const iconStats = { extracted: 0, existing: 0, missing: 0, encrypted: 0, invalid: 0, failed: 0 };
 
-    for (const [category, pkgFiles] of Object.entries(pkgsByCategory)) {
-        log(`  Category: ${category}`);
-        const games = [];
+    for (const { pkgPath, category } of pkgList) {
+        const relativePath = path.relative(baseDir, pkgPath).split(path.sep).join("/");
+        currentKeys.add(relativePath);
+        let fingerprint;
+        try {
+            fingerprint = getPkgFingerprint(pkgPath);
+        } catch (err) {
+            iconStats.failed++;
+            log(`  Could not stat ${relativePath}: ${err.message}`);
+            continue;
+        }
 
-        for (const pkgPath of pkgFiles) {
-            log(`     Processing ${path.basename(pkgPath)}`);
-            const details = extractGameDetails(pkgPath) || {};
-            const pkgMeta = readPkgMetadata(pkgPath);
-            const titleId = details.TITLE_ID || pkgMeta.titleId || path.basename(pkgPath, ".pkg");
-            const contentId = details.CONTENT_ID || pkgMeta.contentId || null;
+        const previous = previousCache.packages[relativePath];
+        const cacheHit = !cacheReset && previous && previous.category === category &&
+            sameFingerprint(previous.fingerprint, fingerprint);
+        let cached;
+
+        if (cacheHit) {
+            reused++;
+            cached = { ...previous, fingerprint };
+            if (cached.error) {
+                iconStats.failed++;
+                nextCache.packages[relativePath] = cached;
+                continue;
+            }
+        } else {
+            inspected++;
+            log(`  Inspecting ${relativePath}`);
+            let pkg;
+            try {
+                pkg = inspectPs4Pkg(pkgPath);
+            } catch (err) {
+                iconStats.failed++;
+                log(`    Skipping invalid PS4 PKG: ${err.message}`);
+                nextCache.packages[relativePath] = {
+                    fingerprint,
+                    category,
+                    error: err.message
+                };
+                continue;
+            }
+
+            const details = pkg.sfo || {};
+            const titleId = details.TITLE_ID || pkg.titleId || path.basename(pkgPath, ".pkg");
+            const contentId = details.CONTENT_ID || pkg.contentId || null;
             const version = (() => {
                 const v = parseFloat(details.VERSION) || 0;
                 const a = parseFloat(details.APP_VER) || 0;
                 return (v >= a ? details.VERSION : details.APP_VER) || "0.00";
             })();
 
-            games.push({
-                pkgPath,
-                region: detectRegion(contentId),
-                title_id: titleId,
-                content_id: contentId,
-                title: details.TITLE || "Unknown",
-                version,
-                release: getFormattedDate(pkgPath),
-                size: fs.statSync(pkgPath).size.toString(),
-                cover_url: findCoverImage(coversDir, serverAddress, titleId, contentId, category)
-            });
-            totalProcessed++;
+            cached = {
+                fingerprint,
+                category,
+                titleId,
+                contentId,
+                iconEntry: serializableIconEntry(pkg.iconEntry),
+                game: {
+                    region: detectRegion(contentId),
+                    title_id: titleId,
+                    content_id: contentId,
+                    title: details.TITLE || "Unknown",
+                    version,
+                    release: getFormattedDate(pkgPath),
+                    size: fingerprint.size
+                }
+            };
         }
 
-        if (games.length > 0) {
-            generateJSON(jsonOutputDir, serverAddress, category, games);
-            log(`     ${games.length} PKG(s) -> ${category}.json`);
-        } else {
-            log(`     No valid PKGs in ${category}`);
+        const coverKey = getCoverKey(category, cached.titleId, cached.contentId);
+        const coverState = getCategoryCoverState(coversDir, category, coverKey);
+        let iconResult = { status: "missing" };
+        if (coverKey) {
+            try {
+                iconResult = coverState.validPath
+                    ? { status: "existing", path: coverState.validPath }
+                    : extractPs4Icon({ path: pkgPath, iconEntry: cached.iconEntry }, path.join(coversDir, category, `${coverKey}.png`), {
+                        overwrite: Boolean(coverState.invalidPath)
+                    });
+            } catch (err) {
+                iconResult = { status: "failed", reason: err.message };
+            }
+        }
+        iconStats[iconResult.status] = (iconStats[iconResult.status] || 0) + 1;
+        if (iconResult.status === "extracted") {
+            log(`    Extracted icon: ${path.relative(coversDir, iconResult.path)}`);
+        } else if (["encrypted", "invalid", "failed"].includes(iconResult.status) && !cacheHit) {
+            log(`    Icon ${iconResult.status}${iconResult.reason ? `: ${iconResult.reason}` : ""}`);
+        }
+
+        cached.coverUrl = findCoverImage(coversDir, serverAddress, cached.titleId, cached.contentId, category);
+        nextCache.packages[relativePath] = cached;
+        if (!gamesByCategory[category]) gamesByCategory[category] = [];
+        gamesByCategory[category].push({
+            pkgPath,
+            ...cached.game,
+            cover_url: cached.coverUrl
+        });
+        totalProcessed++;
+    }
+
+    for (const [relativePath, previous] of Object.entries(previousCache.packages)) {
+        if (!currentKeys.has(relativePath)) {
+            removed++;
+            if (previous?.category) previousCategories.add(previous.category);
         }
     }
 
-    log(`JSON done. ${totalProcessed} PKG(s) processed`);
+    let catalogsWritten = 0;
+    let catalogsUnchanged = 0;
+    const currentCategories = new Set(Object.keys(gamesByCategory));
+    for (const category of [...currentCategories].sort()) {
+        const games = gamesByCategory[category];
+        if (generateJSON(jsonOutputDir, serverAddress, category, games, baseDir)) {
+            catalogsWritten++;
+            log(`  Updated ${category}.json (${games.length} PKG(s))`);
+        } else {
+            catalogsUnchanged++;
+            log(`  Unchanged ${category}.json (${games.length} PKG(s))`);
+        }
+    }
+
+    for (const category of previousCategories) {
+        if (currentCategories.has(category)) continue;
+        const stalePath = path.join(jsonOutputDir, `${category}.json`);
+        try {
+            fs.unlinkSync(stalePath);
+            catalogsWritten++;
+            log(`  Removed stale ${category}.json`);
+        } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+        }
+    }
+
+    const cacheWritten = writeTextFileIfChanged(cachePath, `${JSON.stringify(nextCache, null, 2)}\n`);
+    log(`Cache done. Inspected: ${inspected} | Reused: ${reused} | Removed: ${removed} | Manifest: ${cacheWritten ? "updated" : "unchanged"}`);
+    log(`Icons done. Extracted: ${iconStats.extracted} | Existing: ${iconStats.existing} | Missing: ${iconStats.missing} | Encrypted: ${iconStats.encrypted} | Invalid/failed: ${iconStats.invalid + iconStats.failed}`);
+    log(`JSON done. ${catalogsWritten} updated | ${catalogsUnchanged} unchanged | ${totalProcessed} PKG(s)`);
+    return { totalProcessed, inspected, reused, removed, catalogsWritten, catalogsUnchanged, cacheWritten, iconStats };
 }
 
 async function main() {
@@ -520,10 +644,14 @@ async function shutdown() {
     }
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+if (require.main === module) {
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
 
-main().catch(err => {
-    error(err.message);
-    process.exit(1);
-});
+    main().catch(err => {
+        error(err.message);
+        process.exit(1);
+    });
+}
+
+module.exports = { runJsonOnly };

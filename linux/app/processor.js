@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { execSync } = require("child_process");
+const { buildPackageUrl } = require("./package-url");
 
 const DLC_CODES = { ac: true };
 
@@ -227,13 +228,13 @@ function findCoverImage(coversDir, serverAddress, titleId, contentId, category) 
     return `http://${serverAddress}/covers/default.png`;
 }
 
-function generateJSON(jsonOutputDir, serverAddress, category, games) {
+function generateJSON(jsonOutputDir, serverAddress, category, games, baseDir) {
     const jsonFilePath = path.join(jsonOutputDir, `${category}.json`);
     const jsonData = { DATA: {} };
 
     games.forEach(game => {
-        const pkgUrl = `http://${serverAddress}/pkg/${category}/${path.basename(game.pkgPath)}`;
-        jsonData.DATA[encodeURI(pkgUrl)] = {
+        const pkgUrl = buildPackageUrl(serverAddress, baseDir, game.pkgPath);
+        jsonData.DATA[pkgUrl] = {
             region: game.region,
             title_id: game.title_id,
             name: game.title,
@@ -377,7 +378,7 @@ async function runProcessing(settings, options = {}) {
         }
 
         if (games.length > 0) {
-            generateJSON(jsonOutputDir, serverAddress, category, games);
+            generateJSON(jsonOutputDir, serverAddress, category, games, baseDir);
             log(`     ${games.length} PKG(s) -> ${category}.json`);
         } else {
             log(`     No valid PKGs in ${category}`);

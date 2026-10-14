@@ -1,0 +1,35 @@
+services:
+  fpkgi-node-server:
+    image: nulldevil/fpkgi-node-server:latest
+    pull_policy: always
+    container_name: fpkgi-node-server
+    restart: unless-stopped
+    ports:
+      - "${FPKGI_HTTP_PORT:-8080}:8080"
+      - "${FPKGI_JSON_PORT:-3000}:3000"
+    environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      # LAN hostname/IP and published HTTP port reachable from the PS4.
+      FPKGI_PUBLIC_ADDRESS: "${FPKGI_PUBLIC_ADDRESS:?Set FPKGI_PUBLIC_ADDRESS, for example 192.168.1.10:8080}"
+      FPKGI_HTTP_PORT: "8080"
+      FPKGI_JSON_PORT: "3000"
+      FPKGI_SCAN_INTERVAL_SECONDS: "${FPKGI_SCAN_INTERVAL_SECONDS:-300}"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          require("http").get("http://127.0.0.1:" + process.env.FPKGI_JSON_PORT + "/", response => process.exit(response.statusCode === 200 ? 0 : 1)).on("error", () => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    volumes:
+      # PKGs must be grouped into category folders such as games or homebrew.
+      - "${FPKGI_PKG_DIR:-./data/pkgs}:/data/pkgs:ro"
+      # Optional cover images and background image.
+      - "${FPKGI_COVERS_DIR:-./data/covers}:/data/covers"
+      # Generated FPKGi category JSON files.
+      - "${FPKGI_JSON_DIR:-./data/json}:/data/json"

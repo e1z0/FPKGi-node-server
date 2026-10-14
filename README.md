@@ -1,5 +1,25 @@
 # FPKGi Node Server
 
+## Improved Fork Highlights
+
+This fork focuses on a production-ready, PS4-only Linux and Docker workflow.
+The ready-to-run image is published as
+`nulldevil/fpkgi-node-server:latest` and includes:
+
+- native PS4 FPKG metadata parsing and `icon0.png` extraction on Linux
+- automatic extraction for new packages and repair of missing, zero-byte, or
+  invalid covers
+- persistent incremental scans that inspect only new or changed PKGs
+- catalog and cache writes only when their contents actually change
+- correct download URLs for PKGs stored in nested collection folders
+- configurable runtime UID/GID through `PUID` and `PGID`
+- built-in container health checks and scheduled rescans
+- persistent Compose volumes for packages, covers, generated JSON, and cache
+
+See the [Docker](#docker), [incremental scans](#incremental-scans), and
+[Linux PS4 icon extraction](#linux-ps4-icon-extraction) sections for setup and
+implementation details.
+
 FPKGi Node Server is a set of tools for generating FPKGi-compatible JSON files, serving PKG and cover files over HTTP, and hosting a separate JSON library web UI.
 
 This repository contains the source code for:
@@ -11,6 +31,7 @@ This repository contains the source code for:
 ## Features
 
 - scan category folders containing PS4 `.pkg` files
+- extract plaintext PS4 `icon0.png` cover art on Linux
 - generate FPKGi JSON files
 - serve PKG files and cover images over HTTP
 - host a separate JSON library server on its own port
@@ -235,11 +256,107 @@ The Linux menu includes:
 
 Enabled servers start automatically when the script launches, and the currently running servers are shown at the top of the menu.
 
-### Linux Limitation
+### Linux PS4 Icon Extraction
 
-The Linux version does not extract icons because `orbis-pub-cmd.exe` is Windows-only.
+The Linux version reads the PS4 CNT entry table directly and extracts the
+plaintext `icon0.png` entry (`0x1200`) while generating the FPKGi JSON files.
+New PKGs are handled during the same scheduled scan as catalog generation.
+Existing non-empty PNG/JPEG covers with valid signatures are preserved;
+zero-byte or invalid covers are extracted again automatically.
 
-You should provide cover images in the covers folder if you want custom artwork in generated output.
+This path is intentionally PS4-only. Encrypted icon entries, such as those in
+some official retail packages, are reported and skipped. FPKG icon entries are
+normally plaintext and do not require `orbis-pub-cmd.exe`, Python, or GUI
+dependencies.
+
+The PS4 package parser was informed by the MIT-licensed
+[PKG Viewer](https://github.com/Loopayeh/pkg-viewer) implementation and the
+PS4 format validation documented by
+[PkgToolBox](https://github.com/seregonwar/PkgToolBox).
+
+## Docker
+
+Build the image from the repository root:
+
+```bash
+docker build -t fpkgi-node-server:latest .
+```
+
+The published image is also available from Docker Hub:
+
+```bash
+docker pull nulldevil/fpkgi-node-server:latest
+```
+
+The PKG directory must contain category subfolders such as `games`, `updates`,
+or `homebrew`. Set `FPKGI_PUBLIC_ADDRESS` to the LAN address and published HTTP
+port that your PS4 can reach:
+
+```bash
+docker run -d \
+  --name fpkgi-node-server \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -p 3000:3000 \
+  -e FPKGI_PUBLIC_ADDRESS=192.168.1.10:8080 \
+  -e FPKGI_SCAN_INTERVAL_SECONDS=300 \
+  -v /path/to/pkgs:/data/pkgs:ro \
+  -v /path/to/covers:/data/covers \
+  -v /path/to/json:/data/json \
+  fpkgi-node-server:latest
+```
+
+Open `http://192.168.1.10:3000/` to see the generated FPKGi category URLs.
+The initial scan runs when the container starts. Set
+`FPKGI_SCAN_INTERVAL_SECONDS` to a positive number to rescan periodically, or
+leave it at `0` to scan only at startup.
+
+### Incremental scans
+
+Scan state is persisted as `/data/json/.fpkgi-cache-v1`, so the `json` volume
+must remain writable and persistent. Each package is keyed by its relative
+path, size, and nanosecond modification/change timestamps. Unchanged packages
+reuse cached PS4 metadata and icon offsets; only new or changed packages are
+inspected. Removed packages are dropped from the catalog. The fingerprint
+survives container replacement and bind-mount remapping.
+
+The scanner still validates each expected cover signature, allowing missing,
+zero-byte, or invalid covers to be repaired without parsing the package again.
+Generated category JSON and the cache manifest are written only when their
+contents change. Full-file hashes are deliberately avoided because hashing
+large PKGs on every scan would consume the disk and CPU resources the cache is
+intended to save.
+
+The Node process runs as UID/GID `1000:1000` by default. Set the `PUID` and
+`PGID` environment variables to use different IDs. The container adjusts the
+internal `node` account at startup and drops root privileges before launching
+the server. Keep both ports on your trusted LAN; the application has no
+authentication and should not be exposed to the public internet.
+
+### Docker Compose
+
+An example with all persistent volumes is provided in
+`docker-compose.example.yml`. Create the bind-mount directories, set the LAN
+address reachable by the PS4, and start it with:
+
+```bash
+mkdir -p data/pkgs data/covers data/json
+export FPKGI_PUBLIC_ADDRESS=192.168.1.10:8080
+docker compose -f docker-compose.example.yml up -d
+```
+
+Set `PUID` and `PGID` to the owner of the host bind-mount directories. Do not
+use Compose's `user:` setting because the startup script needs to adjust the
+internal `node` account before dropping privileges. The host directories can
+also be overridden with `FPKGI_PKG_DIR`, `FPKGI_COVERS_DIR`, and
+`FPKGI_JSON_DIR`.
+
+The container health check requests the JSON library service every 30 seconds.
+Its status is available with:
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' fpkgi-node-server
+```
 
 ## Covers And Background Image
 
