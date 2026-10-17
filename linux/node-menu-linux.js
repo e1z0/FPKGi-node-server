@@ -5,6 +5,7 @@ const { startHttpServer, stopHttpServer, validateSettings } = require("./app/pro
 const { startJsonLibraryServer, stopJsonLibraryServer } = require("./app/json-library-server");
 const { inspectPs4Pkg, extractPs4Icon } = require("./app/ps4-pkg");
 const { buildPackageUrl } = require("./app/package-url");
+const { enrichGamesWithTitleMetadata } = require("./app/title-metadata");
 
 let httpServerInstance = null;
 let jsonLibraryServerInstance = null;
@@ -230,7 +231,7 @@ function generateJSON(jsonOutputDir, serverAddress, category, games, baseDir) {
 
     games.forEach(game => {
         const pkgUrl = buildPackageUrl(serverAddress, baseDir, game.pkgPath);
-        jsonData.DATA[pkgUrl] = {
+        const entry = {
             region: game.region,
             title_id: game.title_id,
             name: game.title,
@@ -240,6 +241,8 @@ function generateJSON(jsonOutputDir, serverAddress, category, games, baseDir) {
             min_fw: null,
             cover_url: game.cover_url
         };
+        if (game.description) entry.description = game.description;
+        jsonData.DATA[pkgUrl] = entry;
     });
 
     return writeTextFileIfChanged(jsonFilePath, JSON.stringify(jsonData, null, 4));
@@ -395,7 +398,7 @@ async function stopServers() {
     }
 }
 
-async function runJsonOnly(settings) {
+async function runJsonOnly(settings, options = {}) {
     validateSettings(settings);
 
     const baseDir = settings.paths.pkgScan;
@@ -486,6 +489,7 @@ async function runJsonOnly(settings) {
                 category,
                 titleId,
                 contentId,
+                packageCategory: details.CATEGORY || null,
                 iconEntry: serializableIconEntry(pkg.iconEntry),
                 game: {
                     region: detectRegion(contentId),
@@ -526,6 +530,7 @@ async function runJsonOnly(settings) {
         gamesByCategory[category].push({
             pkgPath,
             ...cached.game,
+            package_category: cached.packageCategory || null,
             cover_url: cached.coverUrl
         });
         totalProcessed++;
@@ -537,6 +542,13 @@ async function runJsonOnly(settings) {
             if (previous?.category) previousCategories.add(previous.category);
         }
     }
+
+    const metadataStats = await enrichGamesWithTitleMetadata(gamesByCategory, jsonOutputDir, settings, {
+        fetch: options.fetch,
+        sleep: options.sleep,
+        now: options.now,
+        onLog: log
+    });
 
     let catalogsWritten = 0;
     let catalogsUnchanged = 0;
@@ -567,8 +579,13 @@ async function runJsonOnly(settings) {
     const cacheWritten = writeTextFileIfChanged(cachePath, `${JSON.stringify(nextCache, null, 2)}\n`);
     log(`Cache done. Inspected: ${inspected} | Reused: ${reused} | Removed: ${removed} | Manifest: ${cacheWritten ? "updated" : "unchanged"}`);
     log(`Icons done. Extracted: ${iconStats.extracted} | Existing: ${iconStats.existing} | Missing: ${iconStats.missing} | Encrypted: ${iconStats.encrypted} | Invalid/failed: ${iconStats.invalid + iconStats.failed}`);
+    if (metadataStats.enabled || metadataStats.cacheHits || metadataStats.overrides) {
+        log(`Descriptions done. Fetched: ${metadataStats.fetched} | Cached: ${metadataStats.cacheHits} | Overrides: ${metadataStats.overrides} | Not found/cached: ${metadataStats.notFound + metadataStats.negativeHits} | Failed: ${metadataStats.failed}`);
+    } else if (metadataStats.candidates > 0) {
+        log("Descriptions disabled. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET to enable fetching.");
+    }
     log(`JSON done. ${catalogsWritten} updated | ${catalogsUnchanged} unchanged | ${totalProcessed} PKG(s)`);
-    return { totalProcessed, inspected, reused, removed, catalogsWritten, catalogsUnchanged, cacheWritten, iconStats };
+    return { totalProcessed, inspected, reused, removed, catalogsWritten, catalogsUnchanged, cacheWritten, iconStats, metadataStats };
 }
 
 async function main() {

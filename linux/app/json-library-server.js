@@ -3,6 +3,11 @@ const path = require("path");
 const http = require("http");
 const zlib = require("zlib");
 
+const INTERNAL_JSON_FILES = new Set([
+    "title-metadata.json",
+    "title-metadata-overrides.json"
+]);
+
 function send(res, status, body, contentType = "text/plain; charset=utf-8") {
     res.writeHead(status, { "Content-Type": contentType });
     res.end(body);
@@ -145,7 +150,7 @@ function sendJsonFile(res, filePath) {
 
 function renderHomePage(serverAddress, jsonDir) {
     const jsonFiles = fs.readdirSync(jsonDir)
-        .filter(file => file.endsWith(".json"))
+        .filter(file => file.endsWith(".json") && !INTERNAL_JSON_FILES.has(file))
         .map(file => {
             const category = path.basename(file, ".json");
             return {
@@ -309,13 +314,14 @@ function renderLibraryPage(category) {
     "  <style>" +
     "    body { background-color: #121212; color: #e0e0e0; font-family: \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; }" +
     "    h1 { text-align: center; color: #ffffff; margin-bottom: 30px; }" +
-    "    #library { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 20px; }" +
+    "    #library { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 20px; }" +
     "    .card { background-color: #1e1e1e; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5); transition: transform 0.2s ease; text-align: center; }" +
     "    .card:hover { transform: scale(1.05); }" +
     "    .card img { width: 100%; height: auto; display: block; }" +
     "    .info { padding: 10px; }" +
     "    .info h3 { margin: 0; font-size: 1em; color: #FF4444; }" +
     "    .info p { margin: 5px 0; font-size: 0.85em; color: #aaa; }" +
+    "    .info .description { color: #ccc; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }" +
     "    .info a { color: #FF4444; text-decoration: none; font-size: 0.8em; }" +
     "    .info a:hover { text-decoration: underline; }" +
     "  </style>" +
@@ -340,6 +346,13 @@ function renderLibraryPage(category) {
     "      var details = document.createElement(\"p\");" +
     "      details.innerHTML = \"<strong>\" + game.region + \" - \" + game.title_id + \"</strong><br>v\" + game.version;" +
     "      info.appendChild(details);" +
+    "      if (game.description) {" +
+    "        var description = document.createElement(\"p\");" +
+    "        description.className = \"description\";" +
+    "        description.textContent = game.description;" +
+    "        description.title = game.description;" +
+    "        info.appendChild(description);" +
+    "      }" +
     "      var link = document.createElement(\"a\");" +
     "      link.href = pkgUrl;" +
     "      link.textContent = \"Download\";" +
@@ -460,6 +473,8 @@ function stopJsonLibraryServer(server, onLog) {
 }
 
 module.exports = {
+    renderHomePage,
+    renderLibraryPage,
     startJsonLibraryServer,
     stopJsonLibraryServer
 };

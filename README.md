@@ -10,6 +10,7 @@ The ready-to-run image is published as
 - automatic extraction for new packages and repair of missing, zero-byte, or
   invalid covers
 - persistent incremental scans that inspect only new or changed PKGs
+- optional IGDB descriptions cached persistently by PS4 Title ID
 - catalog and cache writes only when their contents actually change
 - correct download URLs for PKGs stored in nested collection folders
 - configurable runtime UID/GID through `PUID` and `PGID`
@@ -300,6 +301,8 @@ docker run -d \
   -p 3000:3000 \
   -e FPKGI_PUBLIC_ADDRESS=192.168.1.10:8080 \
   -e FPKGI_SCAN_INTERVAL_SECONDS=300 \
+  -e IGDB_CLIENT_ID=your_twitch_client_id \
+  -e IGDB_CLIENT_SECRET=your_twitch_client_secret \
   -v /path/to/pkgs:/data/pkgs:ro \
   -v /path/to/covers:/data/covers \
   -v /path/to/json:/data/json \
@@ -310,6 +313,46 @@ Open `http://192.168.1.10:3000/` to see the generated FPKGi category URLs.
 The initial scan runs when the container starts. Set
 `FPKGI_SCAN_INTERVAL_SECONDS` to a positive number to rescan periodically, or
 leave it at `0` to scan only at startup.
+
+### IGDB descriptions
+
+Set `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` to enable optional game-description
+lookups. Create the credentials by registering an application in the
+[Twitch developer console](https://dev.twitch.tv/console/apps); IGDB uses
+Twitch application authentication. If either variable is blank, online
+enrichment is disabled and package scanning continues normally.
+
+Only PS4 base games are queried. Results are matched conservatively against
+the title from `param.sfo`, stored in `/data/json/title-metadata.json` under the
+PS4 Title ID, and then shared with updates or DLC carrying that Title ID. A
+successful result is kept indefinitely by default. `IGDB_REFRESH_DAYS` can set
+a positive refresh interval, while `IGDB_NEGATIVE_CACHE_DAYS` controls how long
+a failed match is remembered (default: 7 days). API or network errors are not
+cached, so a later scheduled scan can retry them.
+
+The generated FPKGi records include an additional `description` property. The
+console client may ignore this extension, but the web library on port 3000
+displays it.
+
+For corrections or games not present in IGDB, create
+`/data/json/title-metadata-overrides.json`. Overrides never make network calls
+and take precedence over cached data:
+
+```json
+{
+  "CUSA00900": {
+    "description": "A manually curated description."
+  }
+}
+```
+
+The shorter string form is also accepted:
+
+```json
+{
+  "CUSA00900": "A manually curated description."
+}
+```
 
 ### Incremental scans
 
@@ -327,6 +370,11 @@ contents change. Full-file hashes are deliberately avoided because hashing
 large PKGs on every scan would consume the disk and CPU resources the cache is
 intended to save.
 
+Description state is maintained separately in
+`/data/json/title-metadata.json`. Updating descriptions or manual overrides
+therefore never invalidates the PKG scan cache or causes large package files to
+be inspected again.
+
 The Node process runs as UID/GID `1000:1000` by default. Set the `PUID` and
 `PGID` environment variables to use different IDs. The container adjusts the
 internal `node` account at startup and drops root privileges before launching
@@ -342,6 +390,8 @@ address reachable by the PS4, and start it with:
 ```bash
 mkdir -p data/pkgs data/covers data/json
 export FPKGI_PUBLIC_ADDRESS=192.168.1.10:8080
+export IGDB_CLIENT_ID=your_twitch_client_id
+export IGDB_CLIENT_SECRET=your_twitch_client_secret
 docker compose -f docker-compose.example.yml up -d
 ```
 

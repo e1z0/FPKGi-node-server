@@ -226,3 +226,54 @@ test("incremental scan reuses metadata, preserves unchanged JSON, and handles ch
         fs.rmSync(directory, { recursive: true, force: true });
     }
 });
+
+test("adds cached IGDB descriptions to generated catalogs", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ps4-description-test-"));
+    try {
+        const pkgsDir = path.join(directory, "pkgs");
+        const gamesDir = path.join(pkgsDir, "games");
+        const coversDir = path.join(directory, "covers");
+        const jsonDir = path.join(directory, "json");
+        fs.mkdirSync(gamesDir, { recursive: true });
+        fs.writeFileSync(path.join(gamesDir, "game.pkg"), buildPackage());
+
+        const settings = {
+            serverAddress: "192.0.2.10:8080",
+            httpServer: { enabled: true, address: "0.0.0.0", port: 8080 },
+            paths: { pkgScan: pkgsDir, covers: coversDir },
+            output: { path: jsonDir },
+            metadata: {
+                igdb: {
+                    clientId: "client-id",
+                    clientSecret: "client-secret",
+                    requestIntervalMs: 0
+                }
+            }
+        };
+        const fetch = async url => String(url).startsWith("https://id.twitch.tv/")
+            ? { ok: true, status: 200, json: async () => ({ access_token: "test-token" }) }
+            : {
+                ok: true,
+                status: 200,
+                json: async () => [{
+                    id: 123,
+                    name: "Synthetic PS4 Game",
+                    summary: "A description fetched once and stored by Title ID."
+                }]
+            };
+
+        const result = await runJsonOnly(settings, {
+            fetch,
+            now: () => Date.parse("2026-10-17T12:00:00Z")
+        });
+        assert.equal(result.metadataStats.fetched, 1);
+        const catalog = JSON.parse(fs.readFileSync(path.join(jsonDir, "games.json"), "utf8"));
+        const game = Object.values(catalog.DATA)[0];
+        assert.equal(game.title_id, "CUSA12345");
+        assert.equal(game.description, "A description fetched once and stored by Title ID.");
+        const metadata = JSON.parse(fs.readFileSync(path.join(jsonDir, "title-metadata.json"), "utf8"));
+        assert.equal(metadata.titles.CUSA12345.description, game.description);
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});

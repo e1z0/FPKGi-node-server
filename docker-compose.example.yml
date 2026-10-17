@@ -15,6 +15,12 @@ services:
       FPKGI_HTTP_PORT: "8080"
       FPKGI_JSON_PORT: "3000"
       FPKGI_SCAN_INTERVAL_SECONDS: "${FPKGI_SCAN_INTERVAL_SECONDS:-300}"
+      # Optional IGDB enrichment. Leave both blank to disable online lookups.
+      IGDB_CLIENT_ID: "${IGDB_CLIENT_ID:-}"
+      IGDB_CLIENT_SECRET: "${IGDB_CLIENT_SECRET:-}"
+      # Successful records never expire by default; misses retry after 7 days.
+      IGDB_REFRESH_DAYS: "${IGDB_REFRESH_DAYS:-0}"
+      IGDB_NEGATIVE_CACHE_DAYS: "${IGDB_NEGATIVE_CACHE_DAYS:-7}"
     healthcheck:
       test:
         - CMD
